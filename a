@@ -165,6 +165,11 @@ function updateSubmissionStatus(submissionId, updates) {
 </html>
 
 // JavaScript.html
+let submissionModal = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  submissionModal = new bootstrap.Modal(document.getElementById('newSubmissionModal'));
+});
 <script>
 let currentSubmission = null;
 let submissionsData = [];
@@ -310,11 +315,139 @@ async function updateStatus() {
   }
 }
 
+// Form state management for new submissions
+const formState = {
+  currentSection: 0,
+  department: '',
+  submissionType: '',
+  data: {}
+};
+
+// Define the form structure
+const formSections = {
+  department: {
+    id: 'department',
+    title: 'Select Department',
+    fields: [
+      {
+        type: 'select',
+        id: 'department',
+        label: 'Department',
+        options: ['Mid-Office', 'Front-Office', 'Outsourced'],
+        required: true
+      }
+    ]
+  },
+  submissionType: {
+    id: 'submissionType',
+    title: 'Select Submission Type',
+    fields: [
+      {
+        type: 'select',
+        id: 'submissionType',
+        label: 'Submission Type',
+        options: ['Billing Adjustment', 'Record Only Adjustment', 'Both'],
+        required: true
+      }
+    ]
+  },
+  billingAdjustment: {
+    id: 'billingAdjustment',
+    title: 'Billing Adjustment Details',
+    condition: (state) => ['Billing Adjustment', 'Both'].includes(state.submissionType),
+    fields: [
+      {
+        type: 'text',
+        id: 'accountNumber',
+        label: 'Account Number',
+        required: true
+      },
+      {
+        type: 'number',
+        id: 'adjustmentAmount',
+        label: 'Adjustment Amount',
+        required: true
+      },
+      {
+        type: 'select',
+        id: 'adjustmentReason',
+        label: 'Adjustment Reason',
+        options: ['Billing Error', 'Service Credit', 'Proration', 'Other'],
+        required: true
+      },
+      {
+        type: 'textarea',
+        id: 'adjustmentDescription',
+        label: 'Detailed Description',
+        required: true
+      }
+    ]
+  },
+  recordOnlyAdjustment: {
+    id: 'recordOnlyAdjustment',
+    title: 'Record Only Adjustment Details',
+    condition: (state) => ['Record Only Adjustment', 'Both'].includes(state.submissionType),
+    fields: [
+      {
+        type: 'text',
+        id: 'recordId',
+        label: 'Record ID',
+        required: true
+      },
+      {
+        type: 'select',
+        id: 'recordType',
+        label: 'Record Type',
+        options: ['Customer Record', 'Account Record', 'Service Record'],
+        required: true
+      },
+      {
+        type: 'textarea',
+        id: 'recordChangeDescription',
+        label: 'Change Description',
+        required: true
+      }
+    ]
+  }
+};
+
 // Show new submission form
 function showNewSubmissionForm() {
-  // Re-use the existing form logic here
+  // Reset form state
+  formState.currentSection = 0;
+  formState.department = '';
+  formState.submissionType = '';
+  formState.data = {};
+  
+  // Initialize form
+  initializeForm();
+  
+  // Show modal
   const modal = new bootstrap.Modal(document.getElementById('newSubmissionModal'));
   modal.show();
+}
+
+// Initialize form
+function initializeForm() {
+  const formContent = document.getElementById('formContent');
+  
+  // Add progress indicators
+  formContent.innerHTML = `
+    <div id="formProgress" class="mb-4">
+      <!-- Progress indicators will be dynamically inserted here -->
+    </div>
+    <form id="newSubmissionForm" onsubmit="handleNewSubmission(event)">
+      <div id="dynamicFields"></div>
+      <div class="button-group mt-3">
+        <button type="button" class="btn btn-secondary" onclick="previousSection()" id="prevButton" style="display: none;">Previous</button>
+        <button type="button" class="btn btn-primary" onclick="nextSection()" id="nextButton">Next</button>
+        <button type="submit" class="btn btn-success" id="submitButton" style="display: none;">Submit</button>
+      </div>
+    </form>
+  `;
+  
+  updateProgressIndicators();
+  renderCurrentSection();
 }
 
 // Initialize the dashboard when the page loads
