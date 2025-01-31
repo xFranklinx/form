@@ -24,54 +24,7 @@ function processForm(formData) {
   return { success: true, message: 'Request submitted successfully!' };
 }
 
-function createPDF(formData) {
-  const doc = DocumentApp.create('Billing Adjustment - ' + formData.requestId);
-  const body = doc.getBody();
-  
-  // Add form data to document
-  body.appendParagraph('Request ID: ' + formData.requestId);
-  body.appendParagraph('Department: ' + formData.department);
-  body.appendParagraph('Submitted by: ' + formData.submitter);
-  // Add other fields...
-  
-  doc.saveAndClose();
-  
-  // Convert to PDF
-  const pdf = DriveApp.getFileById(doc.getId()).getAs('application/pdf');
-  return pdf;
-}
-
-function sendEmails(formData, pdfFile) {
-  const emailAddresses = getEmailDistributionList(formData.department);
-  const subject = 'New Billing Adjustment Request - ' + formData.requestId;
-  const body = `A new billing adjustment request has been submitted.\n\n` +
-               `Request ID: ${formData.requestId}\n` +
-               `Department: ${formData.department}\n` +
-               `Submitted by: ${formData.submitter}`;
-               
-  GmailApp.sendEmail(emailAddresses.join(','), subject, body, {
-    attachments: [pdfFile],
-    cc: formData.submitterEmail
-  });
-}
-
-function createTicket(formData) {
-  // Implement your ticket creation logic here
-  // This would integrate with your ticketing system (Ivanti)
-}
-
-function getEmailDistributionList(department) {
-  // Define email distribution lists for each department
-  const distributionLists = {
-    'Mid-Office': ['midoffice@example.com'],
-    'Front-Office': ['frontoffice@example.com'],
-    'Outsourced': ['outsourced@example.com']
-  };
-  
-  return distributionLists[department] || [];
-}
-
-// Index.html (Client-side)
+// Index.html
 <!DOCTYPE html>
 <html>
   <head>
@@ -81,23 +34,18 @@ function getEmailDistributionList(department) {
   </head>
   <body>
     <div class="container mt-4">
-      <h2>Billing Adjustment Request</h2>
+      <h2>Request Form</h2>
+      <div id="formProgress" class="mb-4">
+        <!-- Progress indicators will be dynamically inserted here -->
+      </div>
       <div id="formContent">
         <form id="adjustmentForm" onsubmit="handleSubmit(event)">
-          <!-- Smart form sections that show/hide based on selections -->
-          <div class="form-section">
-            <label for="department" class="form-label">Department</label>
-            <select class="form-select" id="department" required onchange="updateFormFields()">
-              <option value="">Select Department</option>
-              <option value="Mid-Office">Mid-Office</option>
-              <option value="Front-Office">Front-Office</option>
-              <option value="Outsourced">Outsourced</option>
-            </select>
-          </div>
-
           <div id="dynamicFields"></div>
-          
-          <button type="submit" class="btn btn-primary mt-3">Submit Request</button>
+          <div class="button-group mt-3">
+            <button type="button" class="btn btn-secondary" onclick="previousSection()" id="prevButton" style="display: none;">Previous</button>
+            <button type="button" class="btn btn-primary" onclick="nextSection()" id="nextButton">Next</button>
+            <button type="submit" class="btn btn-success" id="submitButton" style="display: none;">Submit</button>
+          </div>
         </form>
       </div>
     </div>
@@ -108,79 +56,163 @@ function getEmailDistributionList(department) {
 
 // JavaScript.html
 <script>
-let formState = {
+// Form state management
+const formState = {
   currentSection: 0,
+  department: '',
+  submissionType: '',
   data: {}
 };
 
-// Define form sections and their conditions
-const formSections = [
-  {
-    id: 'basicInfo',
-    title: 'Basic Information',
+// Define the form structure
+const formSections = {
+  department: {
+    id: 'department',
+    title: 'Select Department',
     fields: [
       {
-        type: 'text',
-        id: 'customerName',
-        label: 'Customer Name',
-        required: true
-      },
-      {
-        type: 'email',
-        id: 'customerEmail',
-        label: 'Customer Email',
+        type: 'select',
+        id: 'department',
+        label: 'Department',
+        options: ['Mid-Office', 'Front-Office', 'Outsourced'],
         required: true
       }
     ]
   },
-  {
-    id: 'adjustmentDetails',
-    title: 'Adjustment Details',
+  submissionType: {
+    id: 'submissionType',
+    title: 'Select Submission Type',
     fields: [
       {
         type: 'select',
-        id: 'adjustmentType',
-        label: 'Adjustment Type',
-        options: ['Credit', 'Debit', 'Refund'],
+        id: 'submissionType',
+        label: 'Submission Type',
+        options: ['Billing Adjustment', 'Record Only Adjustment', 'Both'],
+        required: true
+      }
+    ]
+  },
+  billingAdjustment: {
+    id: 'billingAdjustment',
+    title: 'Billing Adjustment Details',
+    condition: (state) => ['Billing Adjustment', 'Both'].includes(state.submissionType),
+    fields: [
+      {
+        type: 'text',
+        id: 'accountNumber',
+        label: 'Account Number',
         required: true
       },
       {
         type: 'number',
-        id: 'amount',
-        label: 'Amount',
+        id: 'adjustmentAmount',
+        label: 'Adjustment Amount',
+        required: true
+      },
+      {
+        type: 'select',
+        id: 'adjustmentReason',
+        label: 'Adjustment Reason',
+        options: ['Billing Error', 'Service Credit', 'Proration', 'Other'],
+        required: true
+      },
+      {
+        type: 'textarea',
+        id: 'adjustmentDescription',
+        label: 'Detailed Description',
+        required: true
+      }
+    ]
+  },
+  recordOnlyAdjustment: {
+    id: 'recordOnlyAdjustment',
+    title: 'Record Only Adjustment Details',
+    condition: (state) => ['Record Only Adjustment', 'Both'].includes(state.submissionType),
+    fields: [
+      {
+        type: 'text',
+        id: 'recordId',
+        label: 'Record ID',
+        required: true
+      },
+      {
+        type: 'select',
+        id: 'recordType',
+        label: 'Record Type',
+        options: ['Customer Record', 'Account Record', 'Service Record'],
+        required: true
+      },
+      {
+        type: 'textarea',
+        id: 'recordChangeDescription',
+        label: 'Change Description',
         required: true
       }
     ]
   }
-  // Add more sections as needed
-];
+};
 
-function updateFormFields() {
-  const department = document.getElementById('department').value;
-  const dynamicFields = document.getElementById('dynamicFields');
-  
-  // Clear existing fields
-  dynamicFields.innerHTML = '';
-  
-  // Show relevant sections based on department
-  formSections.forEach(section => {
-    if (shouldShowSection(section, department)) {
-      renderSection(section, dynamicFields);
-    }
+// Get visible sections based on current state
+function getVisibleSections() {
+  return Object.values(formSections).filter(section => {
+    if (!section.condition) return true;
+    return section.condition(formState);
   });
 }
 
-function shouldShowSection(section, department) {
-  // Add logic to determine if section should be shown based on department
-  return true; // Modify this based on your requirements
+// Initialize form
+function initializeForm() {
+  updateProgressIndicators();
+  renderCurrentSection();
 }
 
-function renderSection(section, container) {
-  const sectionDiv = document.createElement('div');
-  sectionDiv.className = 'form-section mt-4';
-  sectionDiv.innerHTML = `<h4>${section.title}</h4>`;
+// Update progress indicators
+function updateProgressIndicators() {
+  const sections = getVisibleSections();
+  const progressDiv = document.getElementById('formProgress');
+  progressDiv.innerHTML = '';
   
-  section.fields.forEach(field => {
+  const progressBar = document.createElement('div');
+  progressBar.className = 'progress mb-3';
+  
+  const progress = document.createElement('div');
+  progress.className = 'progress-bar';
+  progress.style.width = `${((formState.currentSection + 1) / sections.length) * 100}%`;
+  
+  progressBar.appendChild(progress);
+  progressDiv.appendChild(progressBar);
+  
+  const steps = document.createElement('div');
+  steps.className = 'd-flex justify-content-between';
+  
+  sections.forEach((section, index) => {
+    const step = document.createElement('div');
+    step.className = 'progress-step';
+    step.innerHTML = `
+      <div class="step-indicator ${index <= formState.currentSection ? 'active' : ''}"></div>
+      <div class="step-label">${section.title}</div>
+    `;
+    steps.appendChild(step);
+  });
+  
+  progressDiv.appendChild(steps);
+}
+
+// Render current section
+function renderCurrentSection() {
+  const sections = getVisibleSections();
+  const currentSection = sections[formState.currentSection];
+  const container = document.getElementById('dynamicFields');
+  
+  container.innerHTML = '';
+  
+  if (!currentSection) return;
+  
+  const sectionDiv = document.createElement('div');
+  sectionDiv.className = 'form-section';
+  sectionDiv.innerHTML = `<h4>${currentSection.title}</h4>`;
+  
+  currentSection.fields.forEach(field => {
     const fieldDiv = document.createElement('div');
     fieldDiv.className = 'mb-3';
     fieldDiv.innerHTML = createFieldHTML(field);
@@ -188,8 +220,20 @@ function renderSection(section, container) {
   });
   
   container.appendChild(sectionDiv);
+  
+  // Update button visibility
+  document.getElementById('prevButton').style.display = 
+    formState.currentSection > 0 ? 'inline-block' : 'none';
+  document.getElementById('nextButton').style.display = 
+    formState.currentSection < sections.length - 1 ? 'inline-block' : 'none';
+  document.getElementById('submitButton').style.display = 
+    formState.currentSection === sections.length - 1 ? 'inline-block' : 'none';
+    
+  // Restore any previously entered values
+  restoreFieldValues();
 }
 
+// Create HTML for different field types
 function createFieldHTML(field) {
   switch (field.type) {
     case 'text':
@@ -197,33 +241,113 @@ function createFieldHTML(field) {
     case 'number':
       return `
         <label for="${field.id}" class="form-label">${field.label}</label>
-        <input type="${field.type}" class="form-control" id="${field.id}" 
+        <input type="${field.type}" class="form-control" id="${field.id}" name="${field.id}"
                ${field.required ? 'required' : ''}>
       `;
     case 'select':
       return `
         <label for="${field.id}" class="form-label">${field.label}</label>
-        <select class="form-select" id="${field.id}" ${field.required ? 'required' : ''}>
+        <select class="form-select" id="${field.id}" name="${field.id}" 
+                ${field.required ? 'required' : ''} onchange="handleFieldChange('${field.id}')">
           <option value="">Select ${field.label}</option>
           ${field.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
         </select>
       `;
-    // Add more field types as needed
+    case 'textarea':
+      return `
+        <label for="${field.id}" class="form-label">${field.label}</label>
+        <textarea class="form-control" id="${field.id}" name="${field.id}" rows="3"
+                  ${field.required ? 'required' : ''}></textarea>
+      `;
   }
 }
 
+// Handle field changes
+function handleFieldChange(fieldId) {
+  const field = document.getElementById(fieldId);
+  formState.data[fieldId] = field.value;
+  
+  if (fieldId === 'department') {
+    formState.department = field.value;
+  } else if (fieldId === 'submissionType') {
+    formState.submissionType = field.value;
+  }
+  
+  // If this field affects form structure, re-render
+  if (['department', 'submissionType'].includes(fieldId)) {
+    updateProgressIndicators();
+  }
+}
+
+// Navigate to next section
+function nextSection() {
+  if (validateCurrentSection()) {
+    saveCurrentSectionData();
+    formState.currentSection++;
+    renderCurrentSection();
+    updateProgressIndicators();
+  }
+}
+
+// Navigate to previous section
+function previousSection() {
+  if (formState.currentSection > 0) {
+    saveCurrentSectionData();
+    formState.currentSection--;
+    renderCurrentSection();
+    updateProgressIndicators();
+  }
+}
+
+// Validate current section
+function validateCurrentSection() {
+  const form = document.getElementById('adjustmentForm');
+  const inputs = form.querySelectorAll('input, select, textarea');
+  
+  let valid = true;
+  inputs.forEach(input => {
+    if (input.required && !input.value) {
+      valid = false;
+      input.classList.add('is-invalid');
+    } else {
+      input.classList.remove('is-invalid');
+    }
+  });
+  
+  return valid;
+}
+
+// Save current section data
+function saveCurrentSectionData() {
+  const form = document.getElementById('adjustmentForm');
+  const inputs = form.querySelectorAll('input, select, textarea');
+  
+  inputs.forEach(input => {
+    formState.data[input.name] = input.value;
+  });
+}
+
+// Restore field values
+function restoreFieldValues() {
+  Object.entries(formState.data).forEach(([key, value]) => {
+    const field = document.getElementById(key);
+    if (field) field.value = value;
+  });
+}
+
+// Handle form submission
 async function handleSubmit(event) {
   event.preventDefault();
   
-  const form = event.target;
-  const formData = new FormData(form);
-  const data = Object.fromEntries(formData.entries());
+  if (!validateCurrentSection()) return;
+  
+  saveCurrentSectionData();
   
   try {
     const result = await google.script.run
       .withSuccessHandler(onSuccess)
       .withFailureHandler(onFailure)
-      .processForm(data);
+      .processForm(formState.data);
   } catch (error) {
     onFailure(error);
   }
@@ -231,12 +355,17 @@ async function handleSubmit(event) {
 
 function onSuccess(result) {
   alert('Request submitted successfully!');
-  document.getElementById('adjustmentForm').reset();
+  formState.currentSection = 0;
+  formState.data = {};
+  initializeForm();
 }
 
 function onFailure(error) {
   alert('Error submitting request: ' + error.message);
 }
+
+// Initialize the form when the page loads
+window.onload = initializeForm;
 </script>
 
 // Stylesheet.html
@@ -253,19 +382,37 @@ function onFailure(error) {
   margin-bottom: 15px;
 }
 
-.error-message {
-  color: #dc3545;
-  font-size: 0.875rem;
-  margin-top: 5px;
+.progress-step {
+  text-align: center;
+  flex: 1;
 }
 
-.success-message {
-  color: #198754;
-  font-size: 0.875rem;
-  margin-top: 5px;
+.step-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #dee2e6;
+  margin: 0 auto 5px;
 }
 
-/* Add responsive styles */
+.step-indicator.active {
+  background-color: #0d6efd;
+}
+
+.step-label {
+  font-size: 0.875rem;
+  color: #6c757d;
+}
+
+.button-group {
+  display: flex;
+  gap: 10px;
+}
+
+.is-invalid {
+  border-color: #dc3545;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 10px;
@@ -273,6 +420,10 @@ function onFailure(error) {
   
   .form-section {
     padding: 15px;
+  }
+  
+  .step-label {
+    font-size: 0.75rem;
   }
 }
 </style>
