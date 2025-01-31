@@ -1,0 +1,278 @@
+// Code.gs (Server-side)
+function doGet() {
+  return HtmlService.createTemplateFromFile('Index')
+      .evaluate()
+      .setTitle('Billing Adjustment Request')
+      .setFaviconUrl('https://www.google.com/images/favicon.ico')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+function processForm(formData) {
+  // Create PDF
+  const pdfFile = createPDF(formData);
+  
+  // Send emails
+  sendEmails(formData, pdfFile);
+  
+  // Create ticket
+  createTicket(formData);
+  
+  return { success: true, message: 'Request submitted successfully!' };
+}
+
+function createPDF(formData) {
+  const doc = DocumentApp.create('Billing Adjustment - ' + formData.requestId);
+  const body = doc.getBody();
+  
+  // Add form data to document
+  body.appendParagraph('Request ID: ' + formData.requestId);
+  body.appendParagraph('Department: ' + formData.department);
+  body.appendParagraph('Submitted by: ' + formData.submitter);
+  // Add other fields...
+  
+  doc.saveAndClose();
+  
+  // Convert to PDF
+  const pdf = DriveApp.getFileById(doc.getId()).getAs('application/pdf');
+  return pdf;
+}
+
+function sendEmails(formData, pdfFile) {
+  const emailAddresses = getEmailDistributionList(formData.department);
+  const subject = 'New Billing Adjustment Request - ' + formData.requestId;
+  const body = `A new billing adjustment request has been submitted.\n\n` +
+               `Request ID: ${formData.requestId}\n` +
+               `Department: ${formData.department}\n` +
+               `Submitted by: ${formData.submitter}`;
+               
+  GmailApp.sendEmail(emailAddresses.join(','), subject, body, {
+    attachments: [pdfFile],
+    cc: formData.submitterEmail
+  });
+}
+
+function createTicket(formData) {
+  // Implement your ticket creation logic here
+  // This would integrate with your ticketing system (Ivanti)
+}
+
+function getEmailDistributionList(department) {
+  // Define email distribution lists for each department
+  const distributionLists = {
+    'Mid-Office': ['midoffice@example.com'],
+    'Front-Office': ['frontoffice@example.com'],
+    'Outsourced': ['outsourced@example.com']
+  };
+  
+  return distributionLists[department] || [];
+}
+
+// Index.html (Client-side)
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+    <?!= include('Stylesheet'); ?>
+  </head>
+  <body>
+    <div class="container mt-4">
+      <h2>Billing Adjustment Request</h2>
+      <div id="formContent">
+        <form id="adjustmentForm" onsubmit="handleSubmit(event)">
+          <!-- Smart form sections that show/hide based on selections -->
+          <div class="form-section">
+            <label for="department" class="form-label">Department</label>
+            <select class="form-select" id="department" required onchange="updateFormFields()">
+              <option value="">Select Department</option>
+              <option value="Mid-Office">Mid-Office</option>
+              <option value="Front-Office">Front-Office</option>
+              <option value="Outsourced">Outsourced</option>
+            </select>
+          </div>
+
+          <div id="dynamicFields"></div>
+          
+          <button type="submit" class="btn btn-primary mt-3">Submit Request</button>
+        </form>
+      </div>
+    </div>
+    
+    <?!= include('JavaScript'); ?>
+  </body>
+</html>
+
+// JavaScript.html
+<script>
+let formState = {
+  currentSection: 0,
+  data: {}
+};
+
+// Define form sections and their conditions
+const formSections = [
+  {
+    id: 'basicInfo',
+    title: 'Basic Information',
+    fields: [
+      {
+        type: 'text',
+        id: 'customerName',
+        label: 'Customer Name',
+        required: true
+      },
+      {
+        type: 'email',
+        id: 'customerEmail',
+        label: 'Customer Email',
+        required: true
+      }
+    ]
+  },
+  {
+    id: 'adjustmentDetails',
+    title: 'Adjustment Details',
+    fields: [
+      {
+        type: 'select',
+        id: 'adjustmentType',
+        label: 'Adjustment Type',
+        options: ['Credit', 'Debit', 'Refund'],
+        required: true
+      },
+      {
+        type: 'number',
+        id: 'amount',
+        label: 'Amount',
+        required: true
+      }
+    ]
+  }
+  // Add more sections as needed
+];
+
+function updateFormFields() {
+  const department = document.getElementById('department').value;
+  const dynamicFields = document.getElementById('dynamicFields');
+  
+  // Clear existing fields
+  dynamicFields.innerHTML = '';
+  
+  // Show relevant sections based on department
+  formSections.forEach(section => {
+    if (shouldShowSection(section, department)) {
+      renderSection(section, dynamicFields);
+    }
+  });
+}
+
+function shouldShowSection(section, department) {
+  // Add logic to determine if section should be shown based on department
+  return true; // Modify this based on your requirements
+}
+
+function renderSection(section, container) {
+  const sectionDiv = document.createElement('div');
+  sectionDiv.className = 'form-section mt-4';
+  sectionDiv.innerHTML = `<h4>${section.title}</h4>`;
+  
+  section.fields.forEach(field => {
+    const fieldDiv = document.createElement('div');
+    fieldDiv.className = 'mb-3';
+    fieldDiv.innerHTML = createFieldHTML(field);
+    sectionDiv.appendChild(fieldDiv);
+  });
+  
+  container.appendChild(sectionDiv);
+}
+
+function createFieldHTML(field) {
+  switch (field.type) {
+    case 'text':
+    case 'email':
+    case 'number':
+      return `
+        <label for="${field.id}" class="form-label">${field.label}</label>
+        <input type="${field.type}" class="form-control" id="${field.id}" 
+               ${field.required ? 'required' : ''}>
+      `;
+    case 'select':
+      return `
+        <label for="${field.id}" class="form-label">${field.label}</label>
+        <select class="form-select" id="${field.id}" ${field.required ? 'required' : ''}>
+          <option value="">Select ${field.label}</option>
+          ${field.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+        </select>
+      `;
+    // Add more field types as needed
+  }
+}
+
+async function handleSubmit(event) {
+  event.preventDefault();
+  
+  const form = event.target;
+  const formData = new FormData(form);
+  const data = Object.fromEntries(formData.entries());
+  
+  try {
+    const result = await google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onFailure)
+      .processForm(data);
+  } catch (error) {
+    onFailure(error);
+  }
+}
+
+function onSuccess(result) {
+  alert('Request submitted successfully!');
+  document.getElementById('adjustmentForm').reset();
+}
+
+function onFailure(error) {
+  alert('Error submitting request: ' + error.message);
+}
+</script>
+
+// Stylesheet.html
+<style>
+.form-section {
+  background-color: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.form-section h4 {
+  color: #0d6efd;
+  margin-bottom: 15px;
+}
+
+.error-message {
+  color: #dc3545;
+  font-size: 0.875rem;
+  margin-top: 5px;
+}
+
+.success-message {
+  color: #198754;
+  font-size: 0.875rem;
+  margin-top: 5px;
+}
+
+/* Add responsive styles */
+@media (max-width: 768px) {
+  .container {
+    padding: 10px;
+  }
+  
+  .form-section {
+    padding: 15px;
+  }
+}
+</style>
